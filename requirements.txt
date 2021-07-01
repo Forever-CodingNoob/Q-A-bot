@@ -1,0 +1,5 @@
+line-bot-sdk==1.19.0
+flask
+firebase-admin
+python-dotenv
+gunicorn
