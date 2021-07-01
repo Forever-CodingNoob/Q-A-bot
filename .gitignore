@@ -124,3 +124,5 @@ dmypy.json
 
 # secret folder
 secret/
+
+.idea/
