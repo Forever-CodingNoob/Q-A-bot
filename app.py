@@ -19,7 +19,7 @@ from linebot import (
     LineBotApi, WebhookHandler
 )
 from linebot.exceptions import (
-    InvalidSignatureError
+    InvalidSignatureError, LineBotApiError
 )
 
 from linebot.models import (
@@ -117,9 +117,29 @@ class Question:
             return True
         return False
 
+    def delete(self):
+        Question.deleteById(groupid=self.groupid,id=self.id)
+
     def __str__(self):
-        username = line_bot_api.get_profile(user_id=self.userid).display_name
-        return f'{self.id}. "{self.text}"--from[{username}]'
+        username=None
+        try:
+            username = line_bot_api.get_group_member_profile(group_id=self.groupid,user_id=self.userid).display_name
+        except LineBotApiError as e:
+            print(e.status_code)
+            print(e.request_id)
+            print(e.error.message)
+            print(e.error.details)
+
+            try:
+                username=line_bot_api.get_profile(user_id=self.userid).display_name
+            except LineBotApiError as e:
+                print(e.status_code)
+                print(e.request_id)
+                print(e.error.message)
+                print(e.error.details)
+
+        text=f'{self.id}. "{self.text}"'
+        return text+f'--from[{username}]' if username is not None else text
 
 
 def getGroup(groupid, addGroupIfNotFound=True):
@@ -199,7 +219,7 @@ def handle_message(event):
         )
         q.save()
         reply = TextSendMessage(text=dstr(f"question [{q.id}] is saved"))
-    elif user_msg.startswith('/') and len(user_msg) > 1:
+    elif user_msg.startswith('/') and len(user_msg) > 1 and event.source.type=='group':
         command = user_msg[1:].split()
         if groupid := event.source.group_id:
             if command[0].lower() == 'all':
@@ -215,30 +235,44 @@ def handle_message(event):
                 else:
                     reply = TextSendMessage(text=dstr("\n" + "\n".join([str(q) for q in qs]) + "\n"))
             elif command[0].lower() == 'del':
-                try:
-                    num = int(command[1])
-                except IndexError:
-                    reply = TextSendMessage(text=errorstr("'/del' missing required argument 'id'"))
-                except ValueError:
-                    reply = TextSendMessage(text=errorstr("the first argument of '/del' must be an integer or 0"))
-                else:
-                    if Question.deleteById(groupid, num):
-                        reply = TextSendMessage(text=dstr(f"question [{num}] is deleted"))
-            elif command[0].lower() == 's':
-                try:
-                    num = int(command[1])
-                except IndexError:
-                    reply = TextSendMessage(text=errorstr("'/del' missing required argument 'id'"))
-                except ValueError:
-                    reply = TextSendMessage(text=errorstr("the first argument of '/del' must be an integer or 0"))
-                else:
-                    try:
-                        q = Question.load(id=num, groupid=groupid)
-                    except FetchError:
-                        reply = TextSendMessage(text=errorstr(f"question [{num}] is not found"))
+                if len(command) >= 2:
+                    if command[1].lower() == 'all':
+                        qs = Question.load_all(groupid=groupid)
+                        for q in qs:
+                            q.delete()
+                        reply = TextSendMessage(text=dstr(f"all questions are deleted"))
                     else:
-                        q.set_solved()
-                        reply = TextSendMessage(text=dstr(f"question [{num}] is solved"))
+                        try:
+                            num = int(command[1])
+                        except ValueError:
+                            reply = TextSendMessage(text=errorstr("the first argument of '/del' must be an integer or 0"))
+                        else:
+                            if Question.deleteById(groupid, num):
+                                reply = TextSendMessage(text=dstr(f"question [{num}] is deleted"))
+                else:
+                    reply = TextSendMessage(text=errorstr("'/del' missing required argument 'id'"))
+            elif command[0].lower() == 's':
+                if len(command)>=2:
+                    if command[1].lower()=='all':
+                        qs = Question.load_all(groupid=groupid,unsolved=True)
+                        for q in qs:
+                            q.set_solved()
+                        reply = TextSendMessage(text=dstr(f"all questions are solved"))
+                    else:
+                        try:
+                            num = int(command[1])
+                        except ValueError:
+                            reply = TextSendMessage(text=errorstr("the first argument of '/s' must be an integer or 0"))
+                        else:
+                            try:
+                                q = Question.load(id=num, groupid=groupid)
+                            except FetchError:
+                                reply = TextSendMessage(text=errorstr(f"question [{num}] is not found"))
+                            else:
+                                q.set_solved()
+                                reply = TextSendMessage(text=dstr(f"question [{num}] is solved"))
+                else:
+                    reply = TextSendMessage(text=errorstr("'/s' missing required argument 'id'"))
 
     # 回傳訊息
     if reply:
